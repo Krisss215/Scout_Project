@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="margin-top:16px;">
+    <div class="badge">Reset</div>
+    <div class="h1" style="font-size:26px;">Verify code + set new password</div>
+
+    <form class="form" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Email</label>
+      <input name="email" type="email" value="{{ email or '' }}" placeholder="you@email.com" required />
+      <label>Reset code</label>
+      <input name="code" placeholder="123456" required />
+      <label>New password</label>
+      <input name="new_password" type="password" placeholder="min 8 chars" required />
+      <button type="submit">Update password</button>
+    </form>
+  </div>
+{% endblock %}

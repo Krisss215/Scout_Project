@@ -1,4 +1,4 @@
-<!-- templates/base.html -->
+<!-- templates/base.html  (REPLACE ENTIRE FILE) -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -35,6 +35,7 @@
     code { color: #ffd6ff; }
     hr { border:0; border-top:1px solid rgba(255,255,255,.08); margin:14px 0; }
     .pill { display:inline-flex; gap:8px; align-items:center; padding:8px 10px; border-radius: 999px; border:1px solid var(--line); background: rgba(0,0,0,.18); }
+    .footer { margin-top:16px; display:flex; gap:10px; justify-content:center; }
     @media (max-width: 860px){ .grid{ grid-template-columns:1fr; } .row{ grid-template-columns:1fr; } }
   </style>
 </head>
@@ -48,6 +49,7 @@
           <a class="btn" href="{{ url_for('dashboard') }}">Dashboard</a>
           <a class="btn" href="{{ url_for('settings') }}">Settings</a>
           <a class="btn" href="{{ url_for('tools_selectors') }}">Tools</a>
+          <a class="btn" href="{{ url_for('logs') }}">Logs</a>
           <a class="btn" href="{{ url_for('profile_redirect') }}">Profile</a>
           <a class="btn" href="{{ url_for('logout') }}">Logout</a>
         {% else %}
@@ -66,6 +68,11 @@
     {% endwith %}
 
     {% block content %}{% endblock %}
+
+    <div class="footer">
+      <a class="small" href="{{ url_for('terms') }}"><u>Terms</u></a>
+      <a class="small" href="{{ url_for('privacy') }}"><u>Privacy</u></a>
+    </div>
   </div>
 </body>
 </html>

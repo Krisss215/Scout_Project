@@ -1,9 +1,9 @@
-<!-- templates/register.html -->
 {% extends "base.html" %}
 {% block content %}
   <div class="card" style="margin-top:16px;">
     <div class="h1" style="font-size:26px;">Create account</div>
     <form class="form" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="row">
         <div>
           <label>Email</label>

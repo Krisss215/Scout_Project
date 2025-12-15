@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="margin-top:16px;">
+    <div class="badge">Reset</div>
+    <div class="h1" style="font-size:26px;">Forgot password</div>
+    <p class="p">Enter your email. If it exists, we will send a reset code.</p>
+
+    <form class="form" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Email</label>
+      <input name="email" type="email" placeholder="you@email.com" required />
+      <button type="submit">Send reset code</button>
+    </form>
+  </div>
+{% endblock %}

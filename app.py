@@ -1,4 +1,4 @@
-# app.py
+# app.py  (REPLACE ENTIRE FILE)
 import os
 import json
 import secrets
@@ -10,7 +10,9 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from dotenv import load_dotenv
+from flask import Flask, render_template, request, redirect, url_for, session, flash, Response
+from flask_wtf.csrf import CSRFProtect
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
@@ -22,8 +24,29 @@ from cv_parser import extract_keywords_from_cv
 from scheduler import start_scheduler, scan_user
 from notifier import send_email, send_telegram, send_sms
 
+load_dotenv()
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    v = (os.environ.get(name) or "").strip().lower()
+    if v in ("1", "true", "yes", "on"):
+        return True
+    if v in ("0", "false", "no", "off"):
+        return False
+    return default
+
+
 app = Flask(__name__)
-app.secret_key = "CHANGE_ME_TO_A_RANDOM_SECRET"
+app.secret_key = os.environ.get("SCOUT_SECRET_KEY", secrets.token_hex(32))
+
+SCOUT_PROD = env_bool("SCOUT_PROD", False)
+app.config["ENV"] = "production" if SCOUT_PROD else "development"
+app.config["DEBUG"] = False if SCOUT_PROD else True
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = True if SCOUT_PROD else False
+
+csrf = CSRFProtect(app)
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -32,13 +55,13 @@ init_db()
 start_scheduler()
 
 
-# ----------------- auth helpers -----------------
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
         if "user_id" not in session:
             return redirect(url_for("login"))
         return view(*args, **kwargs)
+
     return wrapped
 
 
@@ -65,7 +88,6 @@ def get_user_row(user_id: int):
     return row
 
 
-# ----------------- profile helpers -----------------
 def parse_csv_field(value: str):
     items = [x.strip() for x in (value or "").split(",")]
     return [x for x in items if x]
@@ -128,7 +150,6 @@ def upsert_profile(user_id: int, data: dict):
     conn.close()
 
 
-# ----------------- settings bootstrap -----------------
 def ensure_default_settings(user_id: int):
     conn = get_conn()
 
@@ -158,17 +179,77 @@ def ensure_default_settings(user_id: int):
                 (user_id, key),
             )
 
+    # ensure source_health table exists
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS source_health (
+            user_id INTEGER NOT NULL,
+            source_key TEXT NOT NULL,
+            last_ok INTEGER NOT NULL DEFAULT 0,
+            last_status TEXT DEFAULT NULL,
+            last_message TEXT DEFAULT NULL,
+            last_success_at TEXT DEFAULT NULL,
+            last_checked_at TEXT DEFAULT NULL,
+            PRIMARY KEY (user_id, source_key)
+        )
+        """
+    )
+
     conn.commit()
     conn.close()
 
 
-# ----------------- 2FA (Email/SMS OTP) -----------------
+# ---------- shared OTP tables: otp_codes (2FA) + reset_codes (password reset) ----------
 def _utcnow():
     return datetime.utcnow()
 
 
 def _hash_code(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
+def _rate_limit_ok(key: str, window_seconds: int, limit: int) -> bool:
+    """
+    Very simple DB-based rate limit.
+    key: string id (e.g., "reset:email@example.com")
+    """
+    conn = get_conn()
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rate_limits (
+            key TEXT PRIMARY KEY,
+            window_start TEXT NOT NULL,
+            count INTEGER NOT NULL
+        )
+        """
+    )
+    row = conn.execute("SELECT window_start, count FROM rate_limits WHERE key=?", (key,)).fetchone()
+    now = _utcnow()
+    if not row:
+        conn.execute("INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, ?)", (key, now.isoformat(), 1))
+        conn.commit()
+        conn.close()
+        return True
+
+    try:
+        ws = datetime.fromisoformat(row["window_start"])
+    except Exception:
+        ws = now
+
+    if (now - ws).total_seconds() > window_seconds:
+        conn.execute("UPDATE rate_limits SET window_start=?, count=? WHERE key=?", (now.isoformat(), 1, key))
+        conn.commit()
+        conn.close()
+        return True
+
+    if int(row["count"]) >= limit:
+        conn.close()
+        return False
+
+    conn.execute("UPDATE rate_limits SET count=count+1 WHERE key=?", (key,))
+    conn.commit()
+    conn.close()
+    return True
 
 
 def otp_create(user_id: int, code: str, minutes_valid: int = 10):
@@ -236,22 +317,12 @@ def otp_verify(user_id: int, code: str) -> tuple[bool, str]:
     return False, "Invalid code."
 
 
-def set_twofa_settings(user_id: int, enabled: int, method: str):
-    conn = get_conn()
-    conn.execute(
-        "UPDATE users SET twofa_enabled=?, twofa_method=? WHERE id=?",
-        (enabled, method, user_id),
-    )
-    conn.commit()
-    conn.close()
-
-
 def send_otp_to_user(user_id: int) -> str:
     u = get_user_row(user_id)
     if not u:
         raise RuntimeError("User not found.")
 
-    method = (u["twofa_method"] or "email").strip().lower()
+    method = (u.get("twofa_method") or "email").strip().lower()
     code = f"{secrets.randbelow(10**6):06d}"
     otp_create(user_id, code, minutes_valid=10)
 
@@ -271,10 +342,255 @@ def send_otp_to_user(user_id: int) -> str:
         raise RuntimeError("Invalid 2FA method.")
 
 
+# -------- password reset via email OTP --------
+def ensure_reset_table():
+    conn = get_conn()
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS reset_codes (
+            user_id INTEGER PRIMARY KEY,
+            code_hash TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            attempts_left INTEGER NOT NULL DEFAULT 5,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def reset_create(user_id: int, code: str, minutes_valid: int = 15):
+    ensure_reset_table()
+    expires = (_utcnow() + timedelta(minutes=minutes_valid)).isoformat()
+    code_hash = _hash_code(code)
+    conn = get_conn()
+    conn.execute(
+        """
+        INSERT INTO reset_codes (user_id, code_hash, expires_at, attempts_left)
+        VALUES (?, ?, ?, 5)
+        ON CONFLICT(user_id) DO UPDATE SET
+          code_hash=excluded.code_hash,
+          expires_at=excluded.expires_at,
+          attempts_left=5,
+          created_at=CURRENT_TIMESTAMP
+        """,
+        (user_id, code_hash, expires),
+    )
+    conn.commit()
+    conn.close()
+
+
+def reset_get(user_id: int):
+    ensure_reset_table()
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM reset_codes WHERE user_id=?", (user_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def reset_dec_attempts(user_id: int):
+    ensure_reset_table()
+    conn = get_conn()
+    conn.execute("UPDATE reset_codes SET attempts_left = attempts_left - 1 WHERE user_id=?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def reset_delete(user_id: int):
+    ensure_reset_table()
+    conn = get_conn()
+    conn.execute("DELETE FROM reset_codes WHERE user_id=?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def reset_verify(user_id: int, code: str) -> tuple[bool, str]:
+    row = reset_get(user_id)
+    if not row:
+        return False, "No reset session."
+    if row["attempts_left"] <= 0:
+        return False, "Too many attempts. Request a new reset code."
+
+    try:
+        expires = datetime.fromisoformat(row["expires_at"])
+        if _utcnow() > expires:
+            reset_delete(user_id)
+            return False, "Code expired. Request a new reset code."
+    except Exception:
+        reset_delete(user_id)
+        return False, "Code expired. Request a new reset code."
+
+    if _hash_code(code) == row["code_hash"]:
+        reset_delete(user_id)
+        return True, "OK"
+
+    reset_dec_attempts(user_id)
+    return False, "Invalid code."
+
+
+def send_reset_code(email: str) -> bool:
+    email = (email or "").strip().lower()
+    if not email:
+        return False
+
+    user = get_user_by_email(email)
+    if not user:
+        # do not reveal
+        return True
+
+    rl_key = f"reset:{email}"
+    if not _rate_limit_ok(rl_key, window_seconds=60 * 10, limit=3):
+        return False
+
+    code = f"{secrets.randbelow(10**6):06d}"
+    reset_create(user["id"], code, minutes_valid=15)
+    send_email(to_email=email, subject="Scout password reset code", body=f"Your reset code: {code}\nExpires in 15 min.")
+    return True
+
+
+# -------- export + delete account --------
+def export_user_data_csv(user_id: int) -> str:
+    conn = get_conn()
+    user = conn.execute("SELECT id, email, created_at FROM users WHERE id=?", (user_id,)).fetchone()
+    profile = conn.execute("SELECT * FROM profiles WHERE user_id=?", (user_id,)).fetchone()
+    sources = conn.execute("SELECT source_key, is_enabled, config_json FROM user_sources WHERE user_id=?", (user_id,)).fetchall()
+    scans = conn.execute("SELECT * FROM scans WHERE user_id=?", (user_id,)).fetchone()
+    notif = conn.execute("SELECT * FROM notifications WHERE user_id=?", (user_id,)).fetchone()
+    logs = conn.execute(
+        "SELECT started_at, finished_at, status, sources_count, jobs_fetched, matches_found, new_matches, message FROM scan_logs WHERE user_id=? ORDER BY id DESC LIMIT 500",
+        (user_id,),
+    ).fetchall()
+    seen = conn.execute(
+        "SELECT url, title, company, location, first_seen_at, last_seen_at, last_score FROM job_seen WHERE user_id=? ORDER BY last_seen_at DESC LIMIT 5000",
+        (user_id,),
+    ).fetchall()
+    health = conn.execute(
+        "SELECT source_key, last_ok, last_status, last_message, last_success_at, last_checked_at FROM source_health WHERE user_id=?",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+
+    def esc(x):
+        x = "" if x is None else str(x)
+        x = x.replace('"', '""')
+        return f'"{x}"'
+
+    rows = []
+    rows.append("SECTION,FIELD,VALUE")
+    if user:
+        rows.append(f"user,{esc('email')},{esc(user['email'])}")
+        rows.append(f"user,{esc('created_at')},{esc(user['created_at'])}")
+
+    if profile:
+        for k in profile.keys():
+            if k == "user_id":
+                continue
+            rows.append(f"profile,{esc(k)},{esc(profile[k])}")
+
+    if scans:
+        for k in scans.keys():
+            if k == "user_id":
+                continue
+            rows.append(f"scans,{esc(k)},{esc(scans[k])}")
+
+    if notif:
+        for k in notif.keys():
+            if k == "user_id":
+                continue
+            rows.append(f"notifications,{esc(k)},{esc(notif[k])}")
+
+    for s in sources:
+        rows.append(f"source,{esc(s['source_key'])},{esc(s['is_enabled'])}")
+        rows.append(f"source_cfg,{esc(s['source_key'])},{esc(s['config_json'])}")
+
+    for h in health:
+        rows.append(f"source_health,{esc(h['source_key'])},{esc(h['last_status'])}")
+        rows.append(f"source_health_msg,{esc(h['source_key'])},{esc(h['last_message'])}")
+        rows.append(f"source_health_last_success,{esc(h['source_key'])},{esc(h['last_success_at'])}")
+
+    for l in logs:
+        rows.append(f"scan_log,{esc(l['started_at'])},{esc(l['status'])}")
+
+    for j in seen:
+        rows.append(f"job_seen,{esc(j['url'])},{esc(j['last_seen_at'])}")
+
+    return "\n".join(rows) + "\n"
+
+
+def delete_user_account(user_id: int):
+    conn = get_conn()
+    conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+# ----------------- presets shown in UI -----------------
+def _presets_for_ui():
+    return [
+        {"name": "Indeed (RSS) — paste RSS URL", "target_source": "rss_indeed",
+         "fields": {"feed_url": "", "default_company": "Indeed", "default_location": "Tel Aviv"}},
+        {"name": "LinkedIn Jobs (RSS) — paste RSS URL", "target_source": "rss_linkedin",
+         "fields": {"feed_url": "", "default_company": "LinkedIn", "default_location": "Tel Aviv"}},
+        {"name": "Custom RSS — blank", "target_source": "rss",
+         "fields": {"feed_url": "", "default_company": "", "default_location": ""}},
+    ]
+
+
 # ----------------- routes -----------------
 @app.route("/")
 def index():
     return render_template("index.html", user=get_current_user())
+
+
+@app.route("/account")
+@login_required
+def account():
+    user = get_current_user()
+    conn = get_conn()
+    health = conn.execute(
+        "SELECT source_key, last_ok, last_status, last_message, last_success_at, last_checked_at FROM source_health WHERE user_id=?",
+        (user["id"],),
+    ).fetchall()
+    conn.close()
+    return render_template("account.html", user=user, health=[dict(r) for r in health])
+
+
+@app.route("/account/export")
+@login_required
+def account_export():
+    user = get_current_user()
+    csv = export_user_data_csv(user["id"])
+    return Response(
+        csv,
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=scout_export.csv"},
+    )
+
+
+@app.route("/account/delete", methods=["POST"])
+@login_required
+def account_delete():
+    user = get_current_user()
+    # require confirmation string
+    confirm = (request.form.get("confirm") or "").strip().lower()
+    if confirm != "delete":
+        flash("Type DELETE to confirm.", "error")
+        return redirect(url_for("account"))
+    delete_user_account(user["id"])
+    session.clear()
+    flash("Account deleted.", "ok")
+    return redirect(url_for("index"))
+
+
+@app.route("/terms")
+def terms():
+    return render_template("terms.html", user=get_current_user())
+
+
+@app.route("/privacy")
+def privacy():
+    return render_template("privacy.html", user=get_current_user())
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -295,7 +611,6 @@ def register():
             cur.execute("INSERT INTO users (email, password_hash) VALUES (?, ?)", (email, pw_hash))
             conn.commit()
             user_id = cur.lastrowid
-
             conn.execute("UPDATE users SET twofa_enabled=0, twofa_method='email' WHERE id=?", (user_id,))
             conn.commit()
             conn.close()
@@ -325,12 +640,8 @@ def login():
 
         if int(user.get("twofa_enabled", 0)) == 1:
             session["pending_2fa_user_id"] = user["id"]
-            try:
-                channel = send_otp_to_user(user["id"])
-                flash(f"Verification code sent via {channel}.", "ok")
-            except Exception as e:
-                flash(str(e), "error")
-                return redirect(url_for("login"))
+            channel = send_otp_to_user(user["id"])
+            flash(f"Verification code sent via {channel}.", "ok")
             return redirect(url_for("login_2fa"))
 
         session["user_id"] = user["id"]
@@ -353,7 +664,6 @@ def login_2fa():
         if ok:
             session["user_id"] = pending_id
             session.pop("pending_2fa_user_id", None)
-
             if not get_profile(pending_id):
                 return redirect(url_for("onboarding"))
             return redirect(url_for("dashboard"))
@@ -367,12 +677,64 @@ def login_2fa_resend():
     pending_id = session.get("pending_2fa_user_id")
     if not pending_id:
         return redirect(url_for("login"))
-    try:
-        channel = send_otp_to_user(pending_id)
-        flash(f"Code resent via {channel}.", "ok")
-    except Exception as e:
-        flash(str(e), "error")
+    channel = send_otp_to_user(pending_id)
+    flash(f"Code resent via {channel}.", "ok")
     return redirect(url_for("login_2fa"))
+
+
+@app.route("/reset", methods=["GET", "POST"])
+def reset_request():
+    if request.method == "POST":
+        email = (request.form.get("email") or "").strip().lower()
+        ok = send_reset_code(email)
+        # never reveal if user exists
+        if not ok:
+            flash("Too many requests. Try again later.", "error")
+        else:
+            flash("If this email exists, a reset code was sent.", "ok")
+        session["pending_reset_email"] = email
+        return redirect(url_for("reset_verify_page"))
+    return render_template("reset_request.html", user=get_current_user())
+
+
+@app.route("/reset/verify", methods=["GET", "POST"])
+def reset_verify_page():
+    email = (session.get("pending_reset_email") or "").strip().lower()
+    if request.method == "POST":
+        email = (request.form.get("email") or email).strip().lower()
+        code = (request.form.get("code") or "").strip()
+        new_pw = request.form.get("new_password") or ""
+
+        user = get_user_by_email(email)
+        # do not reveal
+        if not user:
+            flash("Invalid reset attempt.", "error")
+            return redirect(url_for("reset_verify_page"))
+
+        rl_key = f"reset-verify:{email}"
+        if not _rate_limit_ok(rl_key, window_seconds=60 * 10, limit=10):
+            flash("Too many attempts. Try again later.", "error")
+            return redirect(url_for("reset_verify_page"))
+
+        ok, msg = reset_verify(user["id"], code)
+        if not ok:
+            flash(msg, "error")
+            return redirect(url_for("reset_verify_page"))
+
+        if len(new_pw) < 8:
+            flash("Password must be at least 8 characters.", "error")
+            return redirect(url_for("reset_verify_page"))
+
+        conn = get_conn()
+        conn.execute("UPDATE users SET password_hash=? WHERE id=?", (generate_password_hash(new_pw), user["id"]))
+        conn.commit()
+        conn.close()
+
+        session.pop("pending_reset_email", None)
+        flash("Password updated. Please login.", "ok")
+        return redirect(url_for("login"))
+
+    return render_template("reset_verify.html", user=get_current_user(), email=email)
 
 
 @app.route("/logout")
@@ -514,7 +876,6 @@ def settings():
             (user["id"], scans_enabled, min_i, max_i),
         )
 
-        # 2FA
         twofa_enabled = 1 if request.form.get("twofa_enabled") == "on" else 0
         twofa_method = (request.form.get("twofa_method") or "email").strip().lower()
         if twofa_method not in ("email", "sms"):
@@ -553,6 +914,7 @@ def settings():
         scans=scans,
         twofa=twofa,
         phone=(get_profile(user["id"]) or {}).get("phone"),
+        presets=_presets_for_ui(),
     )
 
 
@@ -566,18 +928,94 @@ def dashboard():
     if not profile:
         return redirect(url_for("onboarding"))
 
+    # filters
+    min_score = int((request.args.get("min_score") or "35").strip())
+    only_new = (request.args.get("only_new") or "").strip() == "1"
+    location_q = (request.args.get("location") or "").strip().lower()
+
     conn = get_conn()
+
+    scan_row = conn.execute("SELECT last_run_at FROM scans WHERE user_id=?", (user["id"],)).fetchone()
+    last_run_at = (scan_row["last_run_at"] if scan_row else None)
+
     src_rows = conn.execute(
         "SELECT source_key, config_json FROM user_sources WHERE user_id=? AND is_enabled=1",
         (user["id"],),
     ).fetchall()
-    conn.close()
 
     sources = [dict(r) for r in src_rows]
     jobs = get_jobs(sources)
-    ranked = rank_jobs(profile, jobs, min_score=35)
+    ranked = rank_jobs(profile, jobs, min_score=min_score)
 
-    return render_template("dashboard.html", user=user, profile=profile, jobs=ranked, total=len(jobs))
+    url_hashes = []
+    for j in ranked:
+        url = (j.get("url") or "").strip()
+        if not url:
+            continue
+        h = hashlib.sha256(url.encode("utf-8")).hexdigest()
+        j["_url_hash"] = h
+        url_hashes.append(h)
+
+    first_seen_map = {}
+    if url_hashes:
+        placeholders = ",".join(["?"] * len(url_hashes))
+        rows = conn.execute(
+            f"""
+            SELECT url_hash, first_seen_at
+            FROM job_seen
+            WHERE user_id=? AND url_hash IN ({placeholders})
+            """,
+            [user["id"]] + url_hashes,
+        ).fetchall()
+        first_seen_map = {r["url_hash"]: r["first_seen_at"] for r in rows}
+
+    for j in ranked:
+        h = j.get("_url_hash")
+        fs = first_seen_map.get(h)
+        j["_first_seen_at"] = fs
+        j["_is_new"] = False
+        if last_run_at and fs:
+            try:
+                if datetime.fromisoformat(fs.replace("Z", "")) >= datetime.fromisoformat(last_run_at.replace("Z", "")):
+                    j["_is_new"] = True
+            except Exception:
+                j["_is_new"] = False
+
+    # apply dashboard filters (only_new, location contains)
+    filtered = []
+    for j in ranked:
+        if only_new and not j.get("_is_new"):
+            continue
+        if location_q:
+            if location_q not in (j.get("location") or "").lower():
+                continue
+        filtered.append(j)
+
+    logs = conn.execute(
+        """
+        SELECT started_at, finished_at, status, sources_count, jobs_fetched, matches_found, new_matches, message
+        FROM scan_logs
+        WHERE user_id=?
+        ORDER BY id DESC
+        LIMIT 10
+        """,
+        (user["id"],),
+    ).fetchall()
+
+    conn.close()
+
+    return render_template(
+        "dashboard.html",
+        user=user,
+        profile=profile,
+        jobs=filtered,
+        total=len(jobs),
+        last_run_at=last_run_at,
+        logs=[dict(r) for r in logs],
+        f_min_score=min_score,
+        f_only_new=only_new,
+        f_location=location_q,
+    )
 
 
 @app.route("/scan_now", methods=["POST"])
@@ -587,6 +1025,25 @@ def scan_now():
     scan_user(user["id"])
     flash("Scan triggered.", "ok")
     return redirect(url_for("dashboard"))
+
+
+@app.route("/logs")
+@login_required
+def logs():
+    user = get_current_user()
+    conn = get_conn()
+    rows = conn.execute(
+        """
+        SELECT started_at, finished_at, status, sources_count, jobs_fetched, matches_found, new_matches, message
+        FROM scan_logs
+        WHERE user_id=?
+        ORDER BY id DESC
+        LIMIT 100
+        """,
+        (user["id"],),
+    ).fetchall()
+    conn.close()
+    return render_template("logs.html", user=user, logs=[dict(r) for r in rows])
 
 
 @app.route("/tools/selectors", methods=["GET", "POST"])
@@ -607,8 +1064,7 @@ def tools_selectors():
         try:
             r = requests.get(url, timeout=25, headers={"User-Agent": "Scout/1.0 (+selector-helper)"})
             r.raise_for_status()
-            html = r.text
-            soup = BeautifulSoup(html, "html.parser")
+            soup = BeautifulSoup(r.text, "html.parser")
             result["html_title"] = (soup.title.get_text(strip=True) if soup.title else "")
             result["final_url"] = r.url
 
@@ -648,4 +1104,4 @@ def profile_redirect():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=not SCOUT_PROD)

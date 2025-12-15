@@ -1,11 +1,34 @@
-<!-- templates/settings.html -->
+<!-- templates/settings.html  (REPLACE ENTIRE FILE) -->
 {% extends "base.html" %}
 {% block content %}
   <div class="card" style="margin-top:16px;">
     <div class="badge">Settings</div>
     <div class="h1" style="font-size:26px;">Sources, schedule, notifications, 2FA</div>
 
-    <form class="form" method="post">
+    <div class="card" style="padding:14px; margin-top:12px;">
+      <div class="badge">Presets</div>
+      <div class="small">Auto-fills fields. Then click <b>Save settings</b>.</div>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label>Choose preset</label>
+          <select id="presetSelect">
+            <option value="">— Select —</option>
+            {% for p in presets %}
+              <option value="{{ loop.index0 }}">{{ p.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="display:flex; align-items:flex-end; gap:10px;">
+          <button type="button" id="applyPresetBtn">Apply preset</button>
+        </div>
+      </div>
+      <div class="small" style="margin-top:10px;">
+        For Indeed/LinkedIn: paste an RSS feed URL from an RSS provider.
+      </div>
+    </div>
+
+    <form class="form" method="post" style="margin-top:14px;">
+      {{ csrf_token() }}
       <div class="badge">Job sources</div>
 
       {% for key, s in sources.items() %}
@@ -24,7 +47,11 @@
 
           {% for f in s.get("config_fields", []) %}
             <label style="margin-top:10px;">{{ f["label"] }}</label>
-            <input name="cfg_{{ key }}_{{ f['key'] }}" placeholder="{{ f.get('placeholder','') }}" />
+            <input
+              id="cfg_{{ key }}_{{ f['key'] }}"
+              name="cfg_{{ key }}_{{ f['key'] }}"
+              placeholder="{{ f.get('placeholder','') }}"
+            />
           {% endfor %}
         </div>
       {% endfor %}
@@ -87,11 +114,35 @@
         <option value="sms" {% if twofa.get("twofa_method","email")=="sms" %}selected{% endif %}>SMS (needs provider)</option>
       </select>
 
-      <div class="small">
-        SMS requires provider. Phone from profile: <code>{{ phone or "not set" }}</code>
-      </div>
+      <div class="small">SMS requires provider. Phone from profile: <code>{{ phone or "not set" }}</code></div>
 
       <button type="submit">Save settings</button>
     </form>
+
+    <script>
+      const PRESETS = {{ presets|tojson }};
+      const applyBtn = document.getElementById("applyPresetBtn");
+      const presetSelect = document.getElementById("presetSelect");
+
+      function setField(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.value = value ?? "";
+      }
+
+      applyBtn.addEventListener("click", () => {
+        const idx = presetSelect.value;
+        if (idx === "") return;
+
+        const p = PRESETS[parseInt(idx, 10)];
+        const target = p.target_source;
+
+        const cb = document.querySelector(`input[type="checkbox"][name="sources"][value="${target}"]`);
+        if (cb) cb.checked = true;
+
+        for (const [k, v] of Object.entries(p.fields || {})) {
+          setField(`cfg_${target}_${k}`, v);
+        }
+      });
+    </script>
   </div>
 {% endblock %}

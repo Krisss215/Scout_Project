@@ -1,8 +1,13 @@
-# job_sources_registry.py
+# job_sources_registry.py  (REPLACE ENTIRE FILE)
 from boards.rss_board import run_rss_board
 from boards.html_generic_board import run_html_generic_board
 from boards.lever_board import run_lever_board
 from boards.greenhouse_board import run_greenhouse_board
+
+# NOTE:
+# Indeed / LinkedIn do NOT provide stable official RSS for jobs.
+# These presets expect you to paste an RSS feed URL from an RSS provider (RSSHub/FetchRSS/RSS.app/etc.).
+# The engine works with ANY RSS URL.
 
 SOURCES = {
     "lever_api": {
@@ -28,8 +33,32 @@ SOURCES = {
             {"key": "max_results", "label": "Max results (optional)", "placeholder": "200"},
         ],
     },
+
+    # ✅ Indeed RSS preset (expects RSS feed URL from provider)
+    "rss_indeed": {
+        "label": "Indeed (RSS preset — paste RSS feed URL)",
+        "fn": run_rss_board,
+        "config_fields": [
+            {"key": "feed_url", "label": "Indeed RSS feed URL (required)", "placeholder": "Paste RSS URL here"},
+            {"key": "default_company", "label": "Default company (optional)", "placeholder": "Indeed"},
+            {"key": "default_location", "label": "Default location (optional)", "placeholder": "e.g., Tel Aviv"},
+        ],
+    },
+
+    # ✅ LinkedIn RSS preset (expects RSS feed URL from provider)
+    "rss_linkedin": {
+        "label": "LinkedIn Jobs (RSS preset — paste RSS feed URL)",
+        "fn": run_rss_board,
+        "config_fields": [
+            {"key": "feed_url", "label": "LinkedIn RSS feed URL (required)", "placeholder": "Paste RSS URL here"},
+            {"key": "default_company", "label": "Default company (optional)", "placeholder": "LinkedIn"},
+            {"key": "default_location", "label": "Default location (optional)", "placeholder": "e.g., Tel Aviv"},
+        ],
+    },
+
+    # Generic RSS
     "rss": {
-        "label": "RSS Job Feed (recommended)",
+        "label": "Custom RSS feed (any provider)",
         "fn": run_rss_board,
         "config_fields": [
             {"key": "feed_url", "label": "Feed URL (required)", "placeholder": "https://.../jobs.rss"},
@@ -37,6 +66,8 @@ SOURCES = {
             {"key": "default_location", "label": "Default location (optional)", "placeholder": "e.g., Tel Aviv"},
         ],
     },
+
+    # HTML scraper (with pagination)
     "html_generic": {
         "label": "HTML Board (CSS selectors + pagination)",
         "fn": run_html_generic_board,

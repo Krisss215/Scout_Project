@@ -1,4 +1,4 @@
-# scheduler.py
+# scheduler.py  (REPLACE ENTIRE FILE)
 import json
 import random
 import hashlib
@@ -99,10 +99,7 @@ def _should_run_now(scan_row: dict) -> bool:
 
 def _job_seen_exists(user_id: int, url_hash: str) -> bool:
     conn = get_conn()
-    row = conn.execute(
-        "SELECT 1 FROM job_seen WHERE user_id=? AND url_hash=?",
-        (user_id, url_hash),
-    ).fetchone()
+    row = conn.execute("SELECT 1 FROM job_seen WHERE user_id=? AND url_hash=?", (user_id, url_hash)).fetchone()
     conn.close()
     return bool(row)
 
@@ -136,28 +133,116 @@ def _job_seen_upsert(user_id: int, job: dict):
     conn.close()
 
 
+def _insert_scan_log(user_id: int, started_at: str, finished_at: str, status: str,
+                     sources_count: int, jobs_fetched: int, matches_found: int, new_matches: int, message: str | None):
+    conn = get_conn()
+    conn.execute(
+        """
+        INSERT INTO scan_logs (user_id, started_at, finished_at, status, sources_count, jobs_fetched, matches_found, new_matches, message)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (user_id, started_at, finished_at, status, sources_count, jobs_fetched, matches_found, new_matches, message),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ---------- Source Health ----------
+def _set_source_health(user_id: int, source_key: str, ok: bool, message: str | None = None):
+    conn = get_conn()
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS source_health (
+            user_id INTEGER NOT NULL,
+            source_key TEXT NOT NULL,
+            last_ok INTEGER NOT NULL DEFAULT 0,
+            last_status TEXT DEFAULT NULL,
+            last_message TEXT DEFAULT NULL,
+            last_success_at TEXT DEFAULT NULL,
+            last_checked_at TEXT DEFAULT NULL,
+            PRIMARY KEY (user_id, source_key)
+        )
+        """
+    )
+    now = _now().isoformat()
+    if ok:
+        conn.execute(
+            """
+            INSERT INTO source_health (user_id, source_key, last_ok, last_status, last_message, last_success_at, last_checked_at)
+            VALUES (?, ?, 1, 'ok', ?, ?, ?)
+            ON CONFLICT(user_id, source_key) DO UPDATE SET
+              last_ok=1,
+              last_status='ok',
+              last_message=excluded.last_message,
+              last_success_at=excluded.last_success_at,
+              last_checked_at=excluded.last_checked_at
+            """,
+            (user_id, source_key, message, now, now),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO source_health (user_id, source_key, last_ok, last_status, last_message, last_success_at, last_checked_at)
+            VALUES (?, ?, 0, 'error', ?, NULL, ?)
+            ON CONFLICT(user_id, source_key) DO UPDATE SET
+              last_ok=0,
+              last_status='error',
+              last_message=excluded.last_message,
+              last_checked_at=excluded.last_checked_at
+            """,
+            (user_id, source_key, message, now),
+        )
+    conn.commit()
+    conn.close()
+
+
 def scan_user(user_id: int):
     scan_settings = _get_user_scan_settings(user_id)
     if not _should_run_now(scan_settings):
         return
 
+    started = _now()
     min_m = int(scan_settings.get("min_interval_minutes") or 40)
     max_m = int(scan_settings.get("max_interval_minutes") or 60)
     next_minutes = random.randint(min_m, max_m)
+
+    sources_count = 0
+    jobs_fetched = 0
+    matches_found = 0
+    new_matches = 0
 
     try:
         profile = _get_user_profile(user_id)
         if not profile:
             _set_scan_state(user_id, "no_profile", next_minutes)
+            finished = _now()
+            _insert_scan_log(user_id, started.isoformat(), finished.isoformat(), "no_profile", 0, 0, 0, 0, None)
             return
 
         sources = _get_user_sources(user_id)
+        sources_count = len(sources)
         if not sources:
             _set_scan_state(user_id, "no_sources", next_minutes)
+            finished = _now()
+            _insert_scan_log(user_id, started.isoformat(), finished.isoformat(), "no_sources", 0, 0, 0, 0, None)
             return
 
-        jobs = get_jobs(sources)
+        # per-source health: try each source independently
+        all_jobs = []
+        for s in sources:
+            key = s["source_key"]
+            try:
+                jobs = get_jobs([s])
+                _set_source_health(user_id, key, True, f"Fetched {len(jobs)} jobs")
+                all_jobs.extend(jobs)
+            except Exception as e:
+                _set_source_health(user_id, key, False, f"{type(e).__name__}: {e}")
+
+        jobs = all_jobs
+        jobs_fetched = len(jobs)
+
         ranked = rank_jobs(profile, jobs, min_score=35)
+        matches_found = len(ranked)
 
         new_jobs = []
         for j in ranked:
@@ -168,6 +253,8 @@ def scan_user(user_id: int):
             if not _job_seen_exists(user_id, uh):
                 new_jobs.append(j)
             _job_seen_upsert(user_id, j)
+
+        new_matches = len(new_jobs)
 
         top_new = new_jobs[:10]
         lines = [
@@ -195,9 +282,33 @@ def scan_user(user_id: int):
                 conn.close()
 
         _set_scan_state(user_id, "ok", next_minutes)
+        finished = _now()
+        _insert_scan_log(
+            user_id,
+            started.isoformat(),
+            finished.isoformat(),
+            "ok",
+            sources_count,
+            jobs_fetched,
+            matches_found,
+            new_matches,
+            None,
+        )
 
     except Exception as e:
         _set_scan_state(user_id, f"error:{type(e).__name__}", next_minutes)
+        finished = _now()
+        _insert_scan_log(
+            user_id,
+            started.isoformat(),
+            finished.isoformat(),
+            "error",
+            sources_count,
+            jobs_fetched,
+            matches_found,
+            new_matches,
+            str(e),
+        )
 
 
 def scan_all_users():

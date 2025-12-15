@@ -1,4 +1,3 @@
-<!-- templates/onboarding.html -->
 {% extends "base.html" %}
 {% block content %}
   <div class="card" style="margin-top:16px;">
@@ -7,6 +6,7 @@
     <p class="p">Use commas. Example: <code>Office Manager, Nurse, Designer</code></p>
 
     <form class="form" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="row">
         <div>
           <label>Full name</label>
@@ -54,6 +54,7 @@
 
     <div class="badge">CV upload</div>
     <form class="form" method="post" action="{{ url_for('upload_cv') }}" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label>Upload CV (PDF)</label>
       <input type="file" name="cv" accept="application/pdf" />
       <button type="submit">Upload & Auto-fill keywords</button>

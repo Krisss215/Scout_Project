@@ -1,0 +1,28 @@
+<!-- templates/logs.html  (REPLACE ENTIRE FILE) -->
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="margin-top:16px;">
+    <div class="badge">Logs</div>
+    <div class="h1" style="font-size:26px;">Scan logs</div>
+    <p class="p">Last 100 scans</p>
+
+    <div class="jobs">
+      {% for l in logs %}
+        <div class="job">
+          <span class="score">{{ l.status }}</span>
+          <h3>{{ l.started_at }}</h3>
+          <div class="meta">
+            finished: <code>{{ l.finished_at }}</code><br/>
+            sources: {{ l.sources_count }} · jobs: {{ l.jobs_fetched }} · matches: {{ l.matches_found }} · new: {{ l.new_matches }}
+          </div>
+          {% if l.message %}
+            <div class="meta">msg: <code>{{ l.message }}</code></div>
+          {% endif %}
+        </div>
+      {% endfor %}
+      {% if logs|length == 0 %}
+        <div class="job"><div class="meta">No logs yet.</div></div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

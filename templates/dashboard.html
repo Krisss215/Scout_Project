@@ -1,52 +1,94 @@
-<!-- templates/dashboard.html -->
+<!-- templates/dashboard.html  (REPLACE ENTIRE FILE to add filters UI) -->
 {% extends "base.html" %}
 {% block content %}
   <div class="grid">
     <div class="card">
       <div class="badge">Dashboard</div>
       <div class="h1" style="font-size:26px;">Matches</div>
-      <p class="p">Total jobs loaded: <b>{{ total }}</b> · Shown: <b>{{ jobs|length }}</b></p>
+
+      <form class="form" method="get" style="margin-top:12px;">
+        <div class="row">
+          <div>
+            <label>Min score</label>
+            <input name="min_score" type="number" value="{{ f_min_score }}" />
+          </div>
+          <div>
+            <label>Location contains</label>
+            <input name="location" value="{{ f_location }}" placeholder="e.g., tel aviv" />
+          </div>
+        </div>
+        <label class="pill">
+          <input type="checkbox" name="only_new" value="1" {% if f_only_new %}checked{% endif %} />
+          Only 🔥 NEW
+        </label>
+        <button type="submit">Apply filters</button>
+      </form>
+
+      <p class="p" style="margin-top:10px;">
+        Total jobs loaded: <b>{{ total }}</b> · Shown: <b>{{ jobs|length }}</b><br/>
+        Last scan: <code>{{ last_run_at or "never" }}</code> · <a href="{{ url_for('logs') }}"><u>Scan logs</u></a>
+      </p>
 
       <form method="post" action="{{ url_for('scan_now') }}" style="margin: 12px 0;">
+        {{ csrf_token() }}
         <button type="submit">Scan now</button>
       </form>
 
       <div class="jobs">
         {% if jobs|length == 0 %}
           <div class="job">
-            <h3>No matches yet</h3>
-            <div class="meta">Enable sources in Settings and add more keywords/titles.</div>
+            <h3>No matches</h3>
+            <div class="meta">Try lower score or disable Only NEW.</div>
           </div>
         {% endif %}
 
         {% for j in jobs %}
           <div class="job">
-            <span class="score">Score {{ j["_score"] }}</span>
+            <span class="score">
+              Score {{ j["_score"] }}
+              {% if j.get("_is_new") %}
+                <span style="margin-left:8px;">🔥 NEW</span>
+              {% endif %}
+            </span>
             <h3>
               {% if j.get("url") %}<a href="{{ j["url"] }}" target="_blank"><u>{{ j["title"] }}</u></a>{% else %}
                 {{ j["title"] }}
               {% endif %}
             </h3>
             <div class="meta">{{ j.get("company","") }} · {{ j.get("location","") }}</div>
-            <div class="meta">
-              Title hits: <code>{{ (j["_why"]["matched_titles"] or []) | join(', ') }}</code><br/>
-              Keyword hits: <code>{{ (j["_why"]["matched_keywords"] or []) | join(', ') }}</code><br/>
-              Excludes: <code>{{ (j["_why"]["excluded_hits"] or []) | join(', ') }}</code>
-            </div>
+            <div class="meta">First seen: <code>{{ j.get("_first_seen_at") or "—" }}</code></div>
           </div>
         {% endfor %}
       </div>
     </div>
 
     <div class="card">
-      <div class="badge">Profile snapshot</div>
-      <p class="p">
-        <b>Target titles:</b> {{ (profile.get("target_titles") or []) | join(", ") }}<br/>
-        <b>Keywords:</b> {{ (profile.get("keywords") or []) | join(", ") }}<br/>
-        <b>Exclude:</b> {{ (profile.get("exclude_keywords") or []) | join(", ") }}<br/>
-      </p>
+      <div class="badge">Latest scans</div>
+      <div class="small">Last 10 runs</div>
+      <div class="jobs" style="margin-top:10px;">
+        {% for l in logs %}
+          <div class="job">
+            <span class="score">{{ l.status }}</span>
+            <h3>{{ l.started_at }}</h3>
+            <div class="meta">
+              sources: {{ l.sources_count }} · jobs: {{ l.jobs_fetched }} · matches: {{ l.matches_found }} · new: {{ l.new_matches }}
+            </div>
+            {% if l.message %}
+              <div class="meta">msg: <code>{{ l.message }}</code></div>
+            {% endif %}
+          </div>
+        {% endfor %}
+        {% if logs|length == 0 %}
+          <div class="job"><div class="meta">No logs yet.</div></div>
+        {% endif %}
+      </div>
+
+      <hr />
       <a class="btn primary" href="{{ url_for('settings') }}">Settings</a>
+      <a class="btn" href="{{ url_for('account') }}">Account</a>
       <a class="btn" href="{{ url_for('profile_redirect') }}">Edit profile</a>
+      <a class="btn" href="{{ url_for('tools_selectors') }}">Selector tool</a>
+      <a class="btn" href="{{ url_for('logs') }}">All logs</a>
     </div>
   </div>
 {% endblock %}

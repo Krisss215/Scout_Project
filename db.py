@@ -1,4 +1,4 @@
-# db.py
+# db.py  (REPLACE ENTIRE FILE)
 import sqlite3
 from pathlib import Path
 
@@ -32,6 +32,7 @@ def init_db():
             user_id INTEGER PRIMARY KEY,
             full_name TEXT DEFAULT '',
             location TEXT DEFAULT '',
+            phone TEXT DEFAULT NULL,
             target_titles TEXT DEFAULT '[]',
             industries TEXT DEFAULT '[]',
             employment_types TEXT DEFAULT '[]',
@@ -88,17 +89,13 @@ def init_db():
         """
     )
 
-    # --- migrations / 2FA email-or-sms OTP (email works; sms needs provider) ---
+    # 2FA
     try:
         cur.execute("ALTER TABLE users ADD COLUMN twofa_method TEXT DEFAULT 'email'")
     except Exception:
         pass
     try:
         cur.execute("ALTER TABLE users ADD COLUMN twofa_enabled INTEGER NOT NULL DEFAULT 0")
-    except Exception:
-        pass
-    try:
-        cur.execute("ALTER TABLE profiles ADD COLUMN phone TEXT DEFAULT NULL")
     except Exception:
         pass
 
@@ -115,7 +112,7 @@ def init_db():
         """
     )
 
-    # History of seen jobs per user (for "new only" notifications)
+    # Job history (for NEW-only notifications + badges)
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS job_seen (
@@ -129,6 +126,25 @@ def init_db():
             last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
             last_score INTEGER DEFAULT NULL,
             PRIMARY KEY (user_id, url_hash),
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """
+    )
+
+    # Scan logs (UI)
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS scan_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            started_at TEXT NOT NULL,
+            finished_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            sources_count INTEGER NOT NULL DEFAULT 0,
+            jobs_fetched INTEGER NOT NULL DEFAULT 0,
+            matches_found INTEGER NOT NULL DEFAULT 0,
+            new_matches INTEGER NOT NULL DEFAULT 0,
+            message TEXT DEFAULT NULL,
             FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
         )
         """

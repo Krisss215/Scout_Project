@@ -1,0 +1,45 @@
+<!-- templates/account.html  (NEW) -->
+{% extends "base.html" %}
+{% block content %}
+  <div class="grid">
+    <div class="card">
+      <div class="badge">Account</div>
+      <div class="h1" style="font-size:26px;">Export / Delete</div>
+
+      <a class="btn primary" href="{{ url_for('account_export') }}">Export my data (CSV)</a>
+
+      <hr />
+      <div class="badge">Delete account</div>
+      <p class="p">Type <code>DELETE</code> to confirm. This removes your user and all related data.</p>
+      <form class="form" method="post" action="{{ url_for('account_delete') }}">
+        {{ csrf_token() }}
+        <input name="confirm" placeholder="type DELETE" />
+        <button type="submit">Delete account</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="badge">Source health</div>
+      <div class="small">Last check per enabled source (ok/error + last success)</div>
+
+      <div class="jobs" style="margin-top:10px;">
+        {% for h in health %}
+          <div class="job">
+            <span class="score">{{ h.last_status or "—" }}</span>
+            <h3>{{ h.source_key }}</h3>
+            <div class="meta">
+              last_success: <code>{{ h.last_success_at or "—" }}</code><br/>
+              last_checked: <code>{{ h.last_checked_at or "—" }}</code>
+            </div>
+            {% if h.last_message %}
+              <div class="meta">msg: <code>{{ h.last_message }}</code></div>
+            {% endif %}
+          </div>
+        {% endfor %}
+        {% if health|length == 0 %}
+          <div class="job"><div class="meta">No health data yet. Run a scan.</div></div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+{% endblock %}

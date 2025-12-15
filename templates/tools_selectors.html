@@ -1,4 +1,4 @@
-<!-- templates/tools_selectors.html -->
+<!-- templates/tools_selectors.html  (REPLACE ENTIRE FILE) -->
 {% extends "base.html" %}
 {% block content %}
   <div class="card" style="margin-top:16px;">
@@ -7,6 +7,7 @@
     <p class="p">Paste a board URL + CSS selector and see what it matches.</p>
 
     <form class="form" method="post">
+      {{ csrf_token() }}
       <label>URL</label>
       <input name="url" placeholder="https://board.com/jobs" />
       <label>CSS selector</label>
