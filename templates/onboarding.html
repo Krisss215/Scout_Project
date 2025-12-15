@@ -1,0 +1,63 @@
+<!-- templates/onboarding.html -->
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="margin-top:16px;">
+    <div class="badge">Onboarding</div>
+    <div class="h1" style="font-size:26px;">Build your job profile</div>
+    <p class="p">Use commas. Example: <code>Office Manager, Nurse, Designer</code></p>
+
+    <form class="form" method="post">
+      <div class="row">
+        <div>
+          <label>Full name</label>
+          <input name="full_name" value="{{ profile.get('full_name','') }}" placeholder="Full name" />
+        </div>
+        <div>
+          <label>Location</label>
+          <input name="location" value="{{ profile.get('location','') }}" placeholder="City / Country" />
+        </div>
+      </div>
+
+      <label>Phone (for SMS 2FA)</label>
+      <input name="phone" value="{{ profile.get('phone') or '' }}" placeholder="+972..." />
+
+      <label>Target titles (comma-separated)</label>
+      <input name="target_titles" value="{{ (profile.get('target_titles') or []) | join(', ') }}" />
+
+      <label>Industries (comma-separated)</label>
+      <input name="industries" value="{{ (profile.get('industries') or []) | join(', ') }}" />
+
+      <label>Employment types (comma-separated)</label>
+      <input name="employment_types" value="{{ (profile.get('employment_types') or []) | join(', ') }}" />
+
+      <div class="row">
+        <div>
+          <label>Languages (comma-separated)</label>
+          <input name="languages" value="{{ (profile.get('languages') or []) | join(', ') }}" />
+        </div>
+        <div>
+          <label>Salary expectation (optional)</label>
+          <input name="salary_expectation" value="{{ profile.get('salary_expectation') or '' }}" />
+        </div>
+      </div>
+
+      <label>Keywords (comma-separated)</label>
+      <input name="keywords" value="{{ (profile.get('keywords') or []) | join(', ') }}" />
+
+      <label>Exclude keywords (comma-separated)</label>
+      <input name="exclude_keywords" value="{{ (profile.get('exclude_keywords') or []) | join(', ') }}" />
+
+      <button type="submit">Save</button>
+    </form>
+
+    <hr />
+
+    <div class="badge">CV upload</div>
+    <form class="form" method="post" action="{{ url_for('upload_cv') }}" enctype="multipart/form-data">
+      <label>Upload CV (PDF)</label>
+      <input type="file" name="cv" accept="application/pdf" />
+      <button type="submit">Upload & Auto-fill keywords</button>
+      <div class="small">Extracted keywords are merged into your keywords.</div>
+    </form>
+  </div>
+{% endblock %}

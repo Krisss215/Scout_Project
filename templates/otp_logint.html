@@ -1,0 +1,19 @@
+<!-- templates/otp_login.html -->
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="margin-top:16px;">
+    <div class="badge">2FA</div>
+    <div class="h1" style="font-size:26px;">Enter verification code</div>
+    <p class="p">We sent a 6-digit code. It expires in 10 minutes.</p>
+
+    <form class="form" method="post">
+      <label>Code</label>
+      <input name="code" placeholder="123456" />
+      <button type="submit">Verify</button>
+    </form>
+
+    <form method="post" action="{{ url_for('login_2fa_resend') }}" style="margin-top:10px;">
+      <button type="submit">Resend code</button>
+    </form>
+  </div>
+{% endblock %}

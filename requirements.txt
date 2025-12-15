@@ -1,5 +1,10 @@
 Flask
+Werkzeug
+APScheduler
+requests
 pdfplumber
-python-docx
-scikit-learn
-gunicorn
+pyotp
+qrcode[pil]
+requests
+beautifulsoup4
+feedparser

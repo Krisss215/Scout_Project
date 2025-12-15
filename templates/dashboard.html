@@ -1,347 +1,52 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Scout – Your Agent Is Live</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        body {
-            margin: 0;
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-            background:
-                    radial-gradient(circle at top left, #f9a8d4 0, #9f7aea 35%, #4c1d95 65%, #060114 100%);
-            color: #fdf2ff;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 24px;
-        }
+<!-- templates/dashboard.html -->
+{% extends "base.html" %}
+{% block content %}
+  <div class="grid">
+    <div class="card">
+      <div class="badge">Dashboard</div>
+      <div class="h1" style="font-size:26px;">Matches</div>
+      <p class="p">Total jobs loaded: <b>{{ total }}</b> · Shown: <b>{{ jobs|length }}</b></p>
 
-        .card {
-            max-width: 900px;
-            width: 100%;
-            background: rgba(33, 14, 63, 0.96);
-            border-radius: 26px;
-            border: 1px solid rgba(252, 231, 243, 0.7);
-            box-shadow:
-                    0 24px 45px rgba(31, 9, 61, 0.85),
-                    0 0 0 1px rgba(22, 10, 38, 0.95);
-            padding: 26px 26px 22px;
-        }
+      <form method="post" action="{{ url_for('scan_now') }}" style="margin: 12px 0;">
+        <button type="submit">Scan now</button>
+      </form>
 
-        .badge {
-            display: inline-flex;
-            align-items: center;
-            padding: 4px 9px;
-            border-radius: 999px;
-            border: 1px solid rgba(134, 239, 172, 0.9);
-            background: rgba(21, 128, 61, 0.25);
-            font-size: 11px;
-            color: #bbf7d0;
-            margin-bottom: 10px;
-        }
+      <div class="jobs">
+        {% if jobs|length == 0 %}
+          <div class="job">
+            <h3>No matches yet</h3>
+            <div class="meta">Enable sources in Settings and add more keywords/titles.</div>
+          </div>
+        {% endif %}
 
-        .badge-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 999px;
-            margin-right: 6px;
-            background: radial-gradient(circle, #22c55e 0, #4ade80 40%, transparent 70%);
-        }
-
-        h1 {
-            margin: 0 0 4px;
-            font-size: 24px;
-        }
-
-        .subtitle {
-            font-size: 13px;
-            color: #f9d8ff;
-            margin-bottom: 14px;
-        }
-
-        .chips-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-bottom: 16px;
-            font-size: 11px;
-            color: #f9f5ff;
-            align-items: center;
-        }
-
-        .chip-label {
-            opacity: 0.7;
-        }
-
-        .chip {
-            padding: 4px 10px;
-            border-radius: 999px;
-            border: 1px solid rgba(252, 231, 243, 0.9);
-            background: rgba(39, 18, 72, 0.95);
-        }
-
-        .grid {
-            display: grid;
-            grid-template-columns: 1.4fr 1.6fr;
-            gap: 18px;
-        }
-
-        @media (max-width: 780px) {
-            .grid {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        .block {
-            padding: 14px 14px 12px;
-            border-radius: 18px;
-            border: 1px solid rgba(252, 231, 243, 0.6);
-            background: rgba(30, 11, 63, 0.96);
-            font-size: 13px;
-        }
-
-        .block-title {
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: #f9d8ff;
-            margin-bottom: 6px;
-        }
-
-        .kv {
-            display: grid;
-            grid-template-columns: 110px minmax(0, 1fr);
-            gap: 4px 10px;
-            align-items: baseline;
-        }
-
-        .kv-label {
-            font-size: 12px;
-            color: #f9d8ff;
-        }
-
-        .kv-value {
-            font-size: 13px;
-        }
-
-        .tag {
-            display: inline-flex;
-            align-items: center;
-            padding: 4px 8px;
-            border-radius: 999px;
-            border: 1px solid rgba(252, 231, 243, 0.85);
-            font-size: 11px;
-            color: #fdf2ff;
-            margin-right: 6px;
-            margin-bottom: 4px;
-        }
-
-        .cv-preview {
-            max-height: 180px;
-            overflow: auto;
-            background: #0b0418;
-            border-radius: 12px;
-            padding: 10px;
-            font-size: 11px;
-            color: #e9d5ff;
-            white-space: pre-wrap;
-        }
-
-        .jobs-list {
-            margin-top: 10px;
-            display: grid;
-            gap: 10px;
-        }
-
-        .job-card {
-            border-radius: 14px;
-            border: 1px solid rgba(252, 231, 243, 0.7);
-            padding: 10px 11px;
-            background: rgba(25, 7, 55, 0.98);
-            font-size: 12px;
-        }
-
-        .job-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-            gap: 10px;
-        }
-
-        .job-title {
-            font-weight: 600;
-        }
-
-        .job-company {
-            font-size: 11px;
-            color: #f9d8ff;
-        }
-
-        .job-location {
-            font-size: 11px;
-            color: #f9d8ff;
-        }
-
-        .job-score {
-            font-size: 12px;
-            font-weight: 600;
-        }
-
-        .job-desc {
-            margin-top: 4px;
-            font-size: 11px;
-            color: #fce7f3;
-        }
-
-        .job-link {
-            margin-top: 4px;
-            font-size: 11px;
-        }
-
-        .job-link a {
-            color: #f9a8d4;
-            text-decoration: none;
-        }
-
-        .job-link a:hover {
-            text-decoration: underline;
-        }
-
-        .footer-row {
-            margin-top: 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 11px;
-            color: #f9d8ff;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-
-        .back-link {
-            color: #f9a8d4;
-            text-decoration: none;
-        }
-
-        .back-link:hover {
-            text-decoration: underline;
-        }
-
-    </style>
-</head>
-<body>
-
-<div class="card">
-    <div class="badge">
-        <span class="badge-dot"></span>
-        Scout is configured
-    </div>
-
-    <h1>Hi{% if profile.name %} {{ profile.name }}{% endif %}, your job scout is now live.</h1>
-    <p class="subtitle">
-        We’ve created an agent profile from your CV and preferences and already ranked a few
-        roles for you based on your skills and what you’re looking for.
-    </p>
-
-    <div class="chips-row">
-        <span class="chip-label">This prototype already:</span>
-        <span class="chip">Connects job boards (sample dataset)</span>
-        <span class="chip">Ranks matches for your profile</span>
-        <span class="chip">Shows alerts on this dashboard</span>
-    </div>
-
-    <div class="grid">
-        <div class="block">
-            <div class="block-title">Your search profile</div>
-            <div class="kv">
-                <div class="kv-label">Desired roles:</div>
-                <div class="kv-value">{{ profile.desired_roles }}</div>
-
-                <div class="kv-label">Location:</div>
-                <div class="kv-value">
-                    {% if profile.location %}
-                        {{ profile.location }}
-                    {% else %}
-                        Any / not specified
-                    {% endif %}
-                </div>
-
-                <div class="kv-label">Mode:</div>
-                <div class="kv-value">
-                    {% if profile.work_mode == "remote" %}
-                        Remote only
-                    {% elif profile.work_mode == "hybrid" %}
-                        Hybrid
-                    {% elif profile.work_mode == "onsite" %}
-                        On-site
-                    {% else %}
-                        Any
-                    {% endif %}
-                </div>
-
-                <div class="kv-label">Frequency:</div>
-                <div class="kv-value">Every {{ profile.frequency_minutes }} minutes</div>
+        {% for j in jobs %}
+          <div class="job">
+            <span class="score">Score {{ j["_score"] }}</span>
+            <h3>
+              {% if j.get("url") %}<a href="{{ j["url"] }}" target="_blank"><u>{{ j["title"] }}</u></a>{% else %}
+                {{ j["title"] }}
+              {% endif %}
+            </h3>
+            <div class="meta">{{ j.get("company","") }} · {{ j.get("location","") }}</div>
+            <div class="meta">
+              Title hits: <code>{{ (j["_why"]["matched_titles"] or []) | join(', ') }}</code><br/>
+              Keyword hits: <code>{{ (j["_why"]["matched_keywords"] or []) | join(', ') }}</code><br/>
+              Excludes: <code>{{ (j["_why"]["excluded_hits"] or []) | join(', ') }}</code>
             </div>
-
-            <div style="margin-top:10px;">
-                <span class="tag">Connect job boards</span>
-                <span class="tag">Rank matches</span>
-                <span class="tag">Send alerts</span>
-            </div>
-        </div>
-
-        <div class="block">
-            <div class="block-title">CV snapshot</div>
-            <div class="cv-preview">
-                {{ profile.cv_text_sample }}
-            </div>
-        </div>
+          </div>
+        {% endfor %}
+      </div>
     </div>
 
-    <div class="block" style="margin-top: 14px;">
-        <div class="block-title">Top matches right now</div>
-        <div class="jobs-list">
-            {% if matches and matches|length > 0 %}
-                {% for m in matches %}
-                    <div class="job-card">
-                        <div class="job-header">
-                            <div>
-                                <div class="job-title">{{ m.title }}</div>
-                                <div class="job-company">{{ m.company }}</div>
-                                <div class="job-location">{{ m.location }}</div>
-                            </div>
-                            <div class="job-score">
-                                {{ m.score }} / 100
-                            </div>
-                        </div>
-                        <div class="job-desc">
-                            {{ m.explanation }}
-                        </div>
-                        {% if m.url %}
-                            <div class="job-link">
-                                <a href="{{ m.url }}" target="_blank">View job posting ↗</a>
-                            </div>
-                        {% endif %}
-                    </div>
-                {% endfor %}
-            {% else %}
-                <div style="font-size: 12px; color: #fce7f3;">
-                    No matches yet – once we connect real job boards, they’ll appear here.
-                </div>
-            {% endif %}
-        </div>
+    <div class="card">
+      <div class="badge">Profile snapshot</div>
+      <p class="p">
+        <b>Target titles:</b> {{ (profile.get("target_titles") or []) | join(", ") }}<br/>
+        <b>Keywords:</b> {{ (profile.get("keywords") or []) | join(", ") }}<br/>
+        <b>Exclude:</b> {{ (profile.get("exclude_keywords") or []) | join(", ") }}<br/>
+      </p>
+      <a class="btn primary" href="{{ url_for('settings') }}">Settings</a>
+      <a class="btn" href="{{ url_for('profile_redirect') }}">Edit profile</a>
     </div>
-
-    <div class="footer-row">
-        <div>
-            In the next step we’ll hook this into real job sources and run it automatically every
-            {{ profile.frequency_minutes }} minutes.
-        </div>
-        <a href="/" class="back-link">← Set up another profile</a>
-    </div>
-</div>
-
-</body>
-</html>
+  </div>
+{% endblock %}

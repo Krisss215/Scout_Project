@@ -1,0 +1,21 @@
+<!-- templates/register.html -->
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="margin-top:16px;">
+    <div class="h1" style="font-size:26px;">Create account</div>
+    <form class="form" method="post">
+      <div class="row">
+        <div>
+          <label>Email</label>
+          <input name="email" type="email" placeholder="you@email.com" required />
+        </div>
+        <div>
+          <label>Password</label>
+          <input name="password" type="password" placeholder="••••••••" required />
+        </div>
+      </div>
+      <button type="submit">Register</button>
+      <div class="small">Already have an account? <a href="{{ url_for('login') }}"><u>Login</u></a></div>
+    </form>
+  </div>
+{% endblock %}

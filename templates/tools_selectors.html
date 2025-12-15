@@ -1,0 +1,46 @@
+<!-- templates/tools_selectors.html -->
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="margin-top:16px;">
+    <div class="badge">Tools</div>
+    <div class="h1" style="font-size:26px;">Selector helper</div>
+    <p class="p">Paste a board URL + CSS selector and see what it matches.</p>
+
+    <form class="form" method="post">
+      <label>URL</label>
+      <input name="url" placeholder="https://board.com/jobs" />
+      <label>CSS selector</label>
+      <input name="selector" placeholder=".job-card a.job-link" />
+      <label>Optional attribute</label>
+      <input name="attr" placeholder="href" />
+      <button type="submit">Test selector</button>
+    </form>
+
+    {% if result.error %}
+      <div class="flash">{{ result.error }}</div>
+    {% endif %}
+
+    {% if result.final_url %}
+      <p class="small">Fetched: <code>{{ result.final_url }}</code></p>
+      <p class="small">Title: <code>{{ result.html_title }}</code></p>
+    {% endif %}
+
+    {% if result.items and result.items|length > 0 %}
+      <hr />
+      <div class="badge">Matches (first {{ result.items|length }})</div>
+      <div class="jobs" style="margin-top:10px;">
+        {% for it in result.items %}
+          <div class="job">
+            <span class="score">{{ it.tag }}</span>
+            <h3>{{ it.text }}</h3>
+            {% if it.link %}
+              <div class="meta"><a href="{{ it.link }}" target="_blank"><u>{{ it.link }}</u></a></div>
+            {% else %}
+              <div class="meta">No link</div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+{% endblock %}

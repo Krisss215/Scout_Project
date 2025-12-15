@@ -1,0 +1,97 @@
+<!-- templates/settings.html -->
+{% extends "base.html" %}
+{% block content %}
+  <div class="card" style="margin-top:16px;">
+    <div class="badge">Settings</div>
+    <div class="h1" style="font-size:26px;">Sources, schedule, notifications, 2FA</div>
+
+    <form class="form" method="post">
+      <div class="badge">Job sources</div>
+
+      {% for key, s in sources.items() %}
+        {% set enabled = (src_map.get(key, {}).get("is_enabled", 0) == 1) %}
+        <div class="card" style="padding:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+            <div>
+              <b>{{ s["label"] }}</b>
+              <div class="small">Key: <code>{{ key }}</code></div>
+            </div>
+            <label class="pill">
+              <input type="checkbox" name="sources" value="{{ key }}" {% if enabled %}checked{% endif %} />
+              Enabled
+            </label>
+          </div>
+
+          {% for f in s.get("config_fields", []) %}
+            <label style="margin-top:10px;">{{ f["label"] }}</label>
+            <input name="cfg_{{ key }}_{{ f['key'] }}" placeholder="{{ f.get('placeholder','') }}" />
+          {% endfor %}
+        </div>
+      {% endfor %}
+
+      <hr />
+
+      <div class="badge">Scan schedule</div>
+      <label class="pill">
+        <input type="checkbox" name="scans_enabled" {% if scans.get("is_enabled",1)==1 %}checked{% endif %} />
+        Enable auto scans
+      </label>
+
+      <div class="row">
+        <div>
+          <label>Min interval (minutes)</label>
+          <input name="min_interval" type="number" value="{{ scans.get('min_interval_minutes',40) }}" />
+        </div>
+        <div>
+          <label>Max interval (minutes)</label>
+          <input name="max_interval" type="number" value="{{ scans.get('max_interval_minutes',60) }}" />
+        </div>
+      </div>
+
+      <hr />
+
+      <div class="badge">Notifications</div>
+      <div class="row">
+        <label class="pill">
+          <input type="checkbox" name="notify_email" {% if notif.get("notify_email",0)==1 %}checked{% endif %} />
+          Email
+        </label>
+        <label class="pill">
+          <input type="checkbox" name="notify_telegram" {% if notif.get("notify_telegram",0)==1 %}checked{% endif %} />
+          Telegram
+        </label>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Email to</label>
+          <input name="email_to" value="{{ notif.get('email_to') or '' }}" placeholder="you@email.com" />
+        </div>
+        <div>
+          <label>Telegram chat id</label>
+          <input name="telegram_chat_id" value="{{ notif.get('telegram_chat_id') or '' }}" placeholder="123456789" />
+        </div>
+      </div>
+
+      <hr />
+
+      <div class="badge">2FA</div>
+      <label class="pill">
+        <input type="checkbox" name="twofa_enabled" {% if twofa.get("twofa_enabled",0)==1 %}checked{% endif %} />
+        Enable 2FA
+      </label>
+
+      <label>2FA method</label>
+      <select name="twofa_method">
+        <option value="email" {% if twofa.get("twofa_method","email")=="email" %}selected{% endif %}>Email</option>
+        <option value="sms" {% if twofa.get("twofa_method","email")=="sms" %}selected{% endif %}>SMS (needs provider)</option>
+      </select>
+
+      <div class="small">
+        SMS requires provider. Phone from profile: <code>{{ phone or "not set" }}</code>
+      </div>
+
+      <button type="submit">Save settings</button>
+    </form>
+  </div>
+{% endblock %}

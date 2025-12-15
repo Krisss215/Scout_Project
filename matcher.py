@@ -1,61 +1,47 @@
 # matcher.py
-from dataclasses import dataclass
+import re
 from typing import List, Dict
 
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
+
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").strip().lower())
 
 
-@dataclass
-class JobMatchResult:
-    job_id: str
-    title: str
-    company: str
-    location: str
-    url: str
-    score: float
-    explanation: str
+def rank_jobs(profile: Dict, jobs: List[Dict], min_score: int = 35) -> List[Dict]:
+    titles = [_norm(x) for x in (profile.get("target_titles") or []) if _norm(x)]
+    keywords = [_norm(x) for x in (profile.get("keywords") or []) if _norm(x)]
+    excludes = [_norm(x) for x in (profile.get("exclude_keywords") or []) if _norm(x)]
 
+    ranked = []
+    for j in jobs or []:
+        title = _norm(j.get("title", ""))
+        company = _norm(j.get("company", ""))
+        location = _norm(j.get("location", ""))
+        desc = _norm(j.get("description", ""))
 
-def compute_matches(profile_text: str, jobs: List[Dict]) -> List[JobMatchResult]:
-    """
-    profile_text: combined CV + 'what you are looking for'
-    jobs: list of dicts with keys: id, title, company, location, url, description
-    """
-    if not jobs:
-        return []
+        blob = f"{title} {company} {location} {desc}"
 
-    # CV+preferences text + all job descriptions → TF-IDF
-    corpus = [profile_text] + [job["description"] for job in jobs]
+        matched_titles = [t for t in titles if t and t in blob]
+        matched_keywords = [k for k in keywords if k and k in blob]
+        excluded_hits = [x for x in excludes if x and x in blob]
 
-    vectorizer = TfidfVectorizer(stop_words="english")
-    tfidf_matrix = vectorizer.fit_transform(corpus)
+        score = 0
+        score += 30 * min(len(matched_titles), 2)
+        score += 10 * min(len(matched_keywords), 5)
+        score -= 40 * min(len(excluded_hits), 2)
 
-    profile_vec = tfidf_matrix[0:1]
-    job_vecs = tfidf_matrix[1:]
+        score = max(0, min(100, score))
 
-    similarities = cosine_similarity(profile_vec, job_vecs).flatten()
+        out = dict(j)
+        out["_score"] = int(score)
+        out["_why"] = {
+            "matched_titles": matched_titles,
+            "matched_keywords": matched_keywords,
+            "excluded_hits": excluded_hits,
+        }
 
-    results: List[JobMatchResult] = []
-    for sim, job in zip(similarities, jobs):
-        score = float(sim * 100)  # 0–100
-        explanation = (
-            "Score is based on text similarity between your CV + preferences and the job description. "
-            "Higher = more overlapping skills, tools, and keywords. "
-            "Later we can add a deeper LLM-based explanation."
-        )
+        if out["_score"] >= min_score:
+            ranked.append(out)
 
-        results.append(
-            JobMatchResult(
-                job_id=str(job["id"]),
-                title=job["title"],
-                company=job.get("company", ""),
-                location=job.get("location", ""),
-                url=job.get("url", ""),
-                score=round(score, 2),
-                explanation=explanation,
-            )
-        )
-
-    results.sort(key=lambda r: r.score, reverse=True)
-    return results
+    ranked.sort(key=lambda x: x.get("_score", 0), reverse=True)
+    return ranked
