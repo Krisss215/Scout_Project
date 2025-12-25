@@ -1,21 +1,54 @@
-{% extends "base.html" %}
-{% block content %}
-  <div class="card" style="margin-top:16px;">
-    <div class="h1" style="font-size:26px;">Create account</div>
-    <form class="form" method="post">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <div class="row">
-        <div>
-          <label>Email</label>
-          <input name="email" type="email" placeholder="you@email.com" required />
-        </div>
-        <div>
-          <label>Password</label>
-          <input name="password" type="password" placeholder="••••••••" required />
-        </div>
-      </div>
-      <button type="submit">Register</button>
-      <div class="small">Already have an account? <a href="{{ url_for('login') }}"><u>Login</u></a></div>
-    </form>
-  </div>
-{% endblock %}
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Register</title>
+</head>
+<body>
+  <h1>Register</h1>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <ul>
+        {% for category, msg in messages %}
+          <li><b>{{ category }}</b>: {{ msg }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+
+  <form method="POST" action="{{ url_for('register') }}">
+    {{ form.hidden_tag() }} <!-- ✅ CSRF token is here -->
+
+    <div>
+      {{ form.email.label }}<br>
+      {{ form.email(size=32) }}<br>
+      {% for err in form.email.errors %}
+        <small style="color:red">{{ err }}</small><br>
+      {% endfor %}
+    </div>
+
+    <div>
+      {{ form.password.label }}<br>
+      {{ form.password(size=32) }}<br>
+      {% for err in form.password.errors %}
+        <small style="color:red">{{ err }}</small><br>
+      {% endfor %}
+    </div>
+
+    <div>
+      {{ form.confirm_password.label }}<br>
+      {{ form.confirm_password(size=32) }}<br>
+      {% for err in form.confirm_password.errors %}
+        <small style="color:red">{{ err }}</small><br>
+      {% endfor %}
+    </div>
+
+    <div>
+      {{ form.submit() }}
+    </div>
+  </form>
+
+  <p><a href="{{ url_for('login') }}">Already have an account? Login</a></p>
+</body>
+</html>
