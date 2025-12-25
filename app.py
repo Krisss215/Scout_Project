@@ -1,73 +1,94 @@
+# =========================
+# DROP-IN FIX (FULL CODE)
+# Paste this over your existing /login route (and helpers) in app.py
+# =========================
+
 import os
-from flask import Flask, render_template, redirect, url_for, flash, request
-from flask_wtf.csrf import CSRFProtect
-
-# If you already have your own forms, keep them.
-# But make sure your templates include {{ form.hidden_tag() }}.
-
-from forms import LoginForm, RegisterForm  # <-- create forms.py from below
+import sqlite3
+from flask import Flask, render_template, redirect, url_for, flash, request, session
 
 app = Flask(__name__)
-
-# ✅ MUST: stable secret key (Render ENV) for sessions + CSRF to work
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret-change-me")
 
-# Optional but recommended behind proxies (Render)
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = True  # Render is HTTPS
+# --- DB helpers (SQLite) ---
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+DB_PATH = os.path.join(BASE_DIR, "scout.db")
 
-# ✅ Enable CSRF protection globally
-csrf = CSRFProtect(app)
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row  # returns sqlite3.Row
+    return conn
+
+def row_to_dict(row: sqlite3.Row | None) -> dict | None:
+    return dict(row) if row is not None else None
+
+def get_user_by_email(email: str) -> dict | None:
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    conn = get_db()
+    try:
+        cur = conn.execute("SELECT * FROM users WHERE lower(email)=?", (email,))
+        row = cur.fetchone()
+        return row_to_dict(row)  # ✅ dict so .get works
+    finally:
+        conn.close()
+
+# --- Password verify placeholder (replace with your real one) ---
+def verify_password(plain: str, stored_hash: str) -> bool:
+    # If you already use werkzeug.security.check_password_hash, replace this function with it.
+    from werkzeug.security import check_password_hash
+    return check_password_hash(stored_hash, plain)
+
+# --- Flask-WTF form placeholders (replace imports if you already have forms) ---
+from flask_wtf import FlaskForm
+from wtforms import StringField, PasswordField, SubmitField
+from wtforms.validators import DataRequired, Email, Length
+
+class LoginForm(FlaskForm):
+    email = StringField("Email", validators=[DataRequired(), Email(), Length(max=255)])
+    password = PasswordField("Password", validators=[DataRequired(), Length(min=6, max=128)])
+    submit = SubmitField("Login")
 
 
-@app.get("/")
-def home():
-    return render_template("index.html")
-
-
-@app.get("/login")
-@app.post("/login")
+@app.route("/login", methods=["GET", "POST"])
 def login():
     form = LoginForm()
+
     if form.validate_on_submit():
-        # TODO: replace with your real auth logic
-        flash("Logged in (demo).", "success")
+        email = (form.email.data or "").strip().lower()
+        password = form.password.data or ""
+
+        user = get_user_by_email(email)  # ✅ dict or None
+
+        if not user:
+            flash("Invalid email or password", "error")
+            return render_template("login.html", form=form)
+
+        # Adjust the column name to your DB schema:
+        # common: password_hash / password / hash
+        stored_hash = user.get("password_hash") or user.get("password") or user.get("hash")
+        if not stored_hash:
+            flash("Account misconfigured (missing password hash).", "error")
+            return render_template("login.html", form=form)
+
+        if not verify_password(password, stored_hash):
+            flash("Invalid email or password", "error")
+            return render_template("login.html", form=form)
+
+        # ✅ FIX: now .get exists safely because user is dict
+        twofa_enabled = int(user.get("twofa_enabled", 0) or 0)
+        session["user_id"] = user.get("id")
+
+        if twofa_enabled == 1:
+            # If you have a 2FA flow, redirect there
+            return redirect(url_for("twofa_verify"))  # make sure this route exists
+
+        flash("Logged in!", "success")
         return redirect(url_for("home"))
 
-    # If POST failed validation, show errors
+    # If POST but failed validation
     if request.method == "POST":
-        flash("Login failed. Please check the form.", "error")
+        flash("Please check the form fields.", "error")
 
     return render_template("login.html", form=form)
-
-
-@app.get("/register")
-@app.post("/register")
-def register():
-    form = RegisterForm()
-    if form.validate_on_submit():
-        # TODO: replace with your real user creation logic
-        flash("Registered (demo). You can now login.", "success")
-        return redirect(url_for("login"))
-
-    if request.method == "POST":
-        flash("Register failed. Please check the form.", "error")
-
-    return render_template("register.html", form=form)
-
-
-# (Optional) friendlier CSRF error message instead of plain "Bad Request"
-from flask_wtf.csrf import CSRFError
-
-@app.errorhandler(CSRFError)
-def handle_csrf_error(e):
-    # Show a proper page instead of raw 400
-    return (
-        render_template("csrf_error.html", reason=e.description),
-        400
-    )
-
-
-if __name__ == "__main__":
-    # Local dev only
-    app.run(host="0.0.0.0", port=5000)
